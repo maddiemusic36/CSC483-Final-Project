@@ -7,9 +7,9 @@ import spacy
 Go through all of the wiki files and process them into JSON. For each article,
 extract the title and convert the rest into a cleaned list of tokens.
 Args: None
-Returns: None
+Returns: Number of articles processed
 """
-def wiki_files_to_json():
+def wiki_files_to_json(source, dir_path):
     # english natural language processor made by spaCy
     nlp = spacy.load('en_core_web_sm', disable=["ner", "parser"])
     
@@ -17,9 +17,14 @@ def wiki_files_to_json():
     articles = []
     # current document ID
     doc_id = 0
+    # current file number
+    file_num = 0
+    # create a directory to stored the cleaned files
+    os.makedirs(dir_path, exist_ok=True)
+
     # loop through all wiki files
-    for filename in os.listdir("articles"):
-        filepath = os.path.join("articles", filename)
+    for filename in os.listdir(source):
+        filepath = os.path.join(source, filename)
         print("Reading file " + filename + "...")
         with open(filepath, "r", encoding='utf-8') as f:
             title = None
@@ -42,7 +47,9 @@ def wiki_files_to_json():
                             body = [
                                 token.lemma_.lower()
                                 for token in body
-                                if not token.is_punct and not token.is_space and not token.is_stop
+                                if not token.is_punct and not token.is_space and not token.is_stop 
+                                    and not token.lemma_.startswith("http") and not token.lemma_.startswith("www.")
+                                    and token.lemma_ not in "=|"
                             ]
 
                             # add current article to list
@@ -69,17 +76,22 @@ def wiki_files_to_json():
                 body = [
                     token.lemma_.lower()
                     for token in body
-                    if not token.is_punct and not token.is_space and not token.is_stop
+                    if not token.is_punct and not token.is_space and not token.is_stop 
+                        and not token.lemma_.startswith("http") and not token.lemma_.startswith("www.")
+                        and token.lemma_ not in "=|"
                 ]
 
                 articles.append({"id": doc_id, "title": title, "body": body})
                 doc_id += 1
 
-    # write all articles to an output JSON file
-    with open("cleaned_articles.json", "w", encoding='utf-8') as out_f:
-        json.dump(articles, out_f, ensure_ascii=False, indent=4)
+        # write all articles to an output JSON file
+        with open(dir_path + "/cleaned" + str(file_num) + ".json", "w", encoding='utf-8') as out_f:
+            json.dump(articles, out_f, ensure_ascii=False, indent=4)
+        articles = []
+        file_num += 1
 
-    print("All done :)", len(articles), "articles processed")
+    print("All done :)", doc_id, "articles processed")
+    return doc_id
 
 
 """
@@ -104,7 +116,7 @@ def main():
     #### DO NOT RUN THIS ####
     #### This was used to create the cleaned_articles file
     #### It only needed to be ran once
-    #wiki_files_to_json()
+    N = wiki_files_to_json("articles", "cleaned_articles")
 
     # Construct the tf-idf index
     index = build_index("cleaned_articles.json")
