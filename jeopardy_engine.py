@@ -1,4 +1,5 @@
 from collections import Counter
+from sentence_transformers import SentenceTransformer, util
 import json
 import math
 import os
@@ -7,6 +8,8 @@ import spacy
 
 # english natural language processor made by spaCy
 nlp = spacy.load('en_core_web_sm', disable=["ner", "parser"])
+
+model = SentenceTransformer("all-MiniLM-L6-v2")
 
 """
 Go through all of the wiki files and process them into JSON. For each article,
@@ -111,6 +114,8 @@ def build_index(json_dir):
     # dict mapping doc IDs to article titles
     titles = {}
 
+    docs = {}
+
     # extract article information from all JSON files 
     for filename in os.listdir(json_dir):
         filepath = os.path.join(json_dir, filename)
@@ -141,8 +146,10 @@ def build_index(json_dir):
             # add current document information to index
             tfidf[doc["id"]] = scores
             titles[doc["id"]] = doc["title"]
+            docs[doc["id"]] = " ".join(doc["body"])
 
-    return tfidf, titles
+
+    return tfidf, titles, docs
 
 
 """
@@ -166,17 +173,30 @@ def process_questions(q_file):
                 answers = q.pop(-1).split("|")
 
                 # process the question text
-                q = " ".join(q)
-                original_question = q
-                cleaned = nlp(q)
+                # q = " ".join(q)
+                category = q.pop(0)
+                original_question = q.pop(0)
+                category_doc = nlp(category)
+
+                category_cleaned = []
+
+                for token in category_doc:
+                    if token.text == "(":
+                        break
+                    if not token.is_punct and not token.is_space and not token.is_stop:
+                        category_cleaned.append(token.lemma_.lower())
+
+                cleaned = nlp(original_question)
+
                 # remove punctuation, spaces, and stopwords
                 cleaned = [
                     token.lemma_.lower()
                     for token in cleaned
                     if not token.is_punct and not token.is_space and not token.is_stop 
                 ]
+
                 # add cleaned question to list of questions
-                cleaned_questions.append({"question": cleaned, "answer": answers, "original": original_question})
+                cleaned_questions.append({"question": cleaned, "answer": answers, "original": original_question, "category": category_cleaned})
     return cleaned_questions
     
 
@@ -190,12 +210,58 @@ Args:
     N - total number of documents in the vocabulary
     num - cutoff for number of titles to return. "Return top 'num' results"
 """
-def answer_questions(questions, tfidf, titles, N, num):
+def answer_questions(questions, tfidf, titles, N, num, docs):
     # keep track of the correct answers and their positions
     positions = []
     hit_count = 0
     # loop through each question
     for question in questions:
+        q_scores_category = {}
+
+        q_freq_category = Counter(question["category"])
+
+        for term, tf in q_freq_category.items():
+            # log term frequency
+            tf_log = 1 + math.log(tf, 10)
+            # document frequency
+            df = 0
+            for doc in tfidf:
+                if term in tfidf[doc]:
+                    df += 1
+            # inverse document frequency
+            if df > 0:
+                idf = math.log(N/df, 10)
+                # store tf-idf score
+                q_scores_category[term] = tf_log * idf
+
+        category_scores = {}
+        for doc_id in tfidf:
+            score = 0
+            for term, weight in q_scores_category.items():
+                if term in tfidf[doc_id]:
+                    score += weight * tfidf[doc_id][term]
+            category_scores[doc_id] = score
+
+        # sort by score (descending)
+        sorted_scores = sorted(category_scores.items(), key=lambda item: item[1], reverse=True)
+
+        # percentile = 50
+        # index = int(len(sorted_scores) * percentile / 100)
+
+        # if index < len(sorted_scores):
+        #     score_threshold = sorted_scores[index][1]
+        # else:
+        #     score_threshold = sorted_scores[-1][1]
+
+        # category_top_docs = [
+        #     doc_id for doc_id, score in category_scores.items()
+        #     if score >= score_threshold
+        # ]
+
+        post_category_reduction = int(len(tfidf) * 0.05)
+
+        category_top_docs = [doc_id for doc_id, _ in sorted_scores[:1000]]
+
         # keep track of the scores for each term
         q_scores = {}
 
@@ -218,21 +284,60 @@ def answer_questions(questions, tfidf, titles, N, num):
                 q_scores[term] = tf_log * idf
 
         # compute score for documents
-        final_scores = {}
-        for doc_id in tfidf:
+        question_scores = {}
+        for doc_id in category_top_docs:
             score = 0
             for term, weight in q_scores.items():
                 if term in tfidf[doc_id]:
                     score += weight * tfidf[doc_id][term]
-            final_scores[doc_id] = score
+            question_scores[doc_id] = score
 
         # sort by score (descending)
-        sorted_scores = sorted(final_scores.items(), key=lambda item: item[1], reverse=True)
+        sorted_scores = sorted(question_scores.items(), key=lambda item: item[1], reverse=True)
+
+        # final_scores = {}
+        # for doc_id in tfidf:
+        #     final_scores[doc_id] = (.2 * category_scores[doc_id]) + (.8 * question_scores[doc_id])
+
+        # sorted_scores = sorted(final_scores.items(), key=lambda item: item[1], reverse=True)
+
         # slice out the top X scores
-        sorted_scores = sorted_scores[:num]
+        # sorted_scores = sorted_scores[:num]
+
+        post_question_reduction = int(len(category_top_docs) * 0.01)
+
+        question_top_docs = [doc_id for doc_id, _ in sorted_scores[:500]]
+
+        potential_top_docs = [docs[doc_id] for doc_id in question_top_docs]
+
+        question_embedding = model.encode(question["original"], convert_to_tensor=True)
+        doc_embeddings = model.encode(potential_top_docs, convert_to_tensor=True)
+
+        tfidf_scores = [score for _, score in sorted_scores]
+
+        max_tfidf = max(tfidf_scores)
+        min_tfidf = min(tfidf_scores)
+        normalized = {
+            doc_id: (score - min_tfidf) / (max_tfidf - min_tfidf + 1e-8)
+            for (doc_id, score) in sorted_scores
+        }
+
+        scores = util.cos_sim(question_embedding, doc_embeddings)[0]
+        rerank_scores = {doc_id: float(score) for doc_id, score in zip(question_top_docs, scores)}
+
+        weight = 0.5
+
+        final_scores = {
+            doc_id: weight * normalized.get(doc_id, 0) + (1 - weight) * rerank_scores.get(doc_id, 0)
+            for doc_id in question_top_docs
+        }
+
+        reranked = sorted(final_scores.items(), key=lambda x: x[1], reverse=True)
+        top_docs = [titles[doc_id] for doc_id, _ in reranked[:num]]
+
         # get the titles for the associated doc IDs
-        query_answers = [titles[doc_id] for doc_id, _ in sorted_scores]
-        print(f"Getting top {num} results for question \"{question["original"]}\":")
+        query_answers = top_docs # [titles[doc_id] for doc_id, _, _ in top_reranked]
+        print(f"Getting top {num} results for category: \"{question["category"]}\", question \"{question["original"]}\":")
         
         # determine if the correct answer was in the top X results
         found = False
@@ -283,7 +388,7 @@ def main():
 
     # Construct the tf-idf index
     print("Constructing the tf-idf index. This will take up to two minutes...")
-    tfidf_index, articles_dict = build_index("cleaned_articles")
+    tfidf_index, articles_dict, docs = build_index("cleaned_articles")
     print("Done!", len(articles_dict), "document scores computed")
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
@@ -296,7 +401,7 @@ def main():
 
     # Query the index with the questions and get the results
     print("Querying the index for question answers...")
-    answer_questions(questions, tfidf_index, articles_dict, N, 500)
+    answer_questions(questions, tfidf_index, articles_dict, N, 500, docs)
     print("All done!")
 
 
