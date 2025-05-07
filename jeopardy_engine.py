@@ -8,7 +8,7 @@ import spacy
 
 # english natural language processor made by spaCy
 nlp = spacy.load('en_core_web_sm', disable=["ner", "parser"])
-
+# natural language LLM
 model = SentenceTransformer("all-MiniLM-L6-v2")
 
 """
@@ -121,6 +121,8 @@ def build_index(json_dir):
     raw = {}
     # dict holding list of processed token from document
     docs = {}
+    # dict holding categories for each document
+    cats = {}
 
     # extract article information from all JSON files 
     for filename in os.listdir(json_dir):
@@ -154,9 +156,12 @@ def build_index(json_dir):
             titles[doc["id"]] = doc["title"]
             raw[doc["id"]] = doc["raw"]
             docs[doc["id"]] = " ".join(doc["body"])
+            cats[doc["id"]] = [c.lower().strip() for c in doc["categories"]]
+            # if we want to remove stop words
+            #cats[doc["id"]] = [c.lower().strip() for c in doc["categories"] if c not in nlp.Defaults.stop_words]
 
 
-    return tfidf, titles, docs, raw
+    return tfidf, titles, docs, raw, cats
 
 
 """
@@ -217,7 +222,7 @@ Args:
     N - total number of documents in the vocabulary
     num - cutoff for number of titles to return. "Return top 'num' results"
 """
-def answer_questions(questions, tfidf, titles, N, num, docs, raw):
+def answer_questions(questions, tfidf, titles, N, num, docs, raw, categories):
     # keep track of the correct answers and their positions
     positions = []
     positions1 = []
@@ -414,8 +419,6 @@ def answer_questions(questions, tfidf, titles, N, num, docs, raw):
     print(t)
 
 
-
-
 def main():
     #### DO NOT RUN THIS ####
     #### This was used to create the cleaned JSON files
@@ -428,7 +431,7 @@ def main():
 
     # Construct the tf-idf index
     print("Constructing the tf-idf index. This will take up to two minutes...")
-    tfidf_index, articles_dict, docs, raw = build_index("483_cleaned_articles")
+    tfidf_index, articles_dict, docs, raw, cats = build_index("483_cleaned_articles")
     print("Done!", len(articles_dict), "document scores computed")
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
@@ -441,7 +444,7 @@ def main():
 
     # Query the index with the questions and get the results
     print("Querying the index for question answers...")
-    answer_questions(questions, tfidf_index, articles_dict, N, 500, docs, raw)
+    answer_questions(questions, tfidf_index, articles_dict, N, 500, docs, raw, cats)
     print("All done!")
 
 
