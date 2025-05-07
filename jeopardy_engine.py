@@ -57,7 +57,6 @@ def wiki_files_to_json(source, dir_path):
                                 for token in body
                                 if not token.is_punct and not token.is_space and not token.is_stop 
                                     and not token.lemma_.startswith("http") and not token.lemma_.startswith("www.")
-                                    and token.lemma_ not in "=|"
                             ]
 
                             # add current article to list
@@ -89,7 +88,6 @@ def wiki_files_to_json(source, dir_path):
                     for token in body
                     if not token.is_punct and not token.is_space and not token.is_stop 
                         and not token.lemma_.startswith("http") and not token.lemma_.startswith("www.")
-                        and token.lemma_ not in "=|"
                 ]
 
                 articles.append({"id": doc_id, "title": title, "body": body, "raw": raw_body, "categories": categories})
@@ -113,6 +111,15 @@ Returns: A tf-idf index created from the JSON data and a dictionary mapping
     document IDs to article titles.
 """
 def build_index(json_dir):
+    # make sure user has the json files
+    if not os.path.isdir(json_dir):
+        print(f"ERROR: directory {json_dir} does not exist")
+        exit()
+    # TODO: uncomment this later
+    # if len(os.listdir(json_dir)) != 80:
+    #     print(f"ERROR: user has not downloaded all JSON files into directory {json_dir}")
+    #     exit()
+
     # tf-idf index (dict of dicts);  doc_id -> term -> tf-idf
     tfidf = {}
     # dict mapping doc IDs to article titles
@@ -156,10 +163,13 @@ def build_index(json_dir):
             titles[doc["id"]] = doc["title"]
             raw[doc["id"]] = doc["raw"]
             docs[doc["id"]] = " ".join(doc["body"])
-            cats[doc["id"]] = [c.lower().strip() for c in doc["categories"]]
-            # if we want to remove stop words
-            #cats[doc["id"]] = [c.lower().strip() for c in doc["categories"] if c not in nlp.Defaults.stop_words]
-
+            c = [c.strip().split() for c in doc["categories"]]
+            cat = []
+            for sublist in c:
+                for item in sublist:
+                    if item not in nlp.Defaults.stop_words:
+                        cat.append(item)
+            cats[doc["id"]] = cat
 
     return tfidf, titles, docs, raw, cats
 
