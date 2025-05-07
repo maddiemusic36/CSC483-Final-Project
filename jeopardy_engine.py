@@ -36,6 +36,7 @@ def wiki_files_to_json(source, dir_path):
         with open(filepath, "r", encoding='utf-8') as f:
             title = None
             body_lines = []
+            categories = []
 
             # loop through each file line by line
             for line in f:
@@ -46,10 +47,10 @@ def wiki_files_to_json(source, dir_path):
                     if line.startswith("[[") and line.endswith("]]"):
                         # we already have a title
                         if title:
-                            body = " ".join(body_lines)
+                            raw_body = " ".join(body_lines)
                             
                             # gets the lemma of each word
-                            body = nlp(body)
+                            body = nlp(raw_body)
                             # handles removing punctuation, extra spaces and stop words
                             body = [
                                 token.lemma_.lower()
@@ -60,7 +61,7 @@ def wiki_files_to_json(source, dir_path):
                             ]
 
                             # add current article to list
-                            articles.append({"id": doc_id, "title": title, "body": body})
+                            articles.append({"id": doc_id, "title": title, "body": body, "raw": raw_body, "categories": categories})
                             doc_id += 1
                             # reset title
                             title = None
@@ -70,15 +71,18 @@ def wiki_files_to_json(source, dir_path):
                     elif "#redirect" in line.lower():
                         title = None
                         continue
+                    # store categories
+                    elif line.startswith("CATEGORIES:"):
+                        categories += line[12:].split(",")
                     # ignore section headers
                     elif not line.startswith('=='):
                         body_lines.append(line)
             # checks for edge case (last article in the file)
             if title:
-                body = " ".join(body_lines)
+                raw_body = " ".join(body_lines)
 
                 # gets the lemma of each word
-                body = nlp(body)
+                body = nlp(raw_body)
                 # handles removing punctuation, extra spaces and stop words
                 body = [
                     token.lemma_.lower()
@@ -88,7 +92,7 @@ def wiki_files_to_json(source, dir_path):
                         and token.lemma_ not in "=|"
                 ]
 
-                articles.append({"id": doc_id, "title": title, "body": body})
+                articles.append({"id": doc_id, "title": title, "body": body, "raw": raw_body, "categories": categories})
                 doc_id += 1
 
         # write all articles to an output JSON file
@@ -113,9 +117,9 @@ def build_index(json_dir):
     tfidf = {}
     # dict mapping doc IDs to article titles
     titles = {}
-
+    # dict holding unprocessed document text
     raw = {}
-
+    # dict holding list of processed token from document
     docs = {}
 
     # extract article information from all JSON files 
@@ -417,8 +421,8 @@ def main():
     #### This was used to create the cleaned JSON files
     #### It only needed to be ran once
     print("Processing raw wiki files...")
-    #N = wiki_files_to_json("articles", "cleaned_articles")
-    N = 137471
+    # N = wiki_files_to_json("articles", "cleaned_articles")
+    N = 135572
     print("Done!", N, "articles processed")
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 

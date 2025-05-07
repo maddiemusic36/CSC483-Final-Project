@@ -10,3 +10,13 @@ the related Wikipedia article with at least 0.4 precision and 0.5 MRR?
 
 \* The questions were extracted from j-archive.com from previous shows between
 2013-01-01 and 2013-01-07
+
+
+# Running the project
+
+1. Create a virtual environment with `python -m venv env`
+2. Source the environment. For Windows: `./env/Scripts/activate`
+3. Install the dependencies `pip install -r requirements.txt`
+4. Download the nlp `python -m spacy download en_core_web_sm`
+
+Now you should be good to run the `jeopardy_engine.py` file!
