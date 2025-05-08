@@ -18,5 +18,6 @@ the related Wikipedia article with at least 0.4 precision and 0.5 MRR?
 2. Source the environment. For Windows: `./env/Scripts/activate`
 3. Install the dependencies `pip install -r requirements.txt`
 4. Download the nlp `python -m spacy download en_core_web_sm`
+5. Download the processed JSON files into a folder named `cleaned_articles`. The link for these will be in the project report.
 
 Now you should be good to run the `jeopardy_engine.py` file!

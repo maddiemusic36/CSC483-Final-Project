@@ -1,5 +1,6 @@
 from collections import Counter
 from sentence_transformers import SentenceTransformer, util
+import ijson
 import json
 import math
 import os
@@ -136,40 +137,38 @@ def build_index(json_dir):
         filepath = os.path.join(json_dir, filename)
         print("Reading file " + filename + "...")
         with open(filepath, "r", encoding='utf-8') as f:
-            data = json.load(f)
+            # loop through every document in the current file
+            for doc in ijson.items(f, "item"):
+                # keep track of the scores for each term
+                scores = {}
 
-        # loop through every document in the current file
-        for doc in data:
-            # keep track of the scores for each term
-            scores = {}
+                # collections.Counter counts the term frequency of unique terms
+                count_freq = Counter(doc["body"])
 
-            # collections.Counter counts the term frequency of unique terms
-            count_freq = Counter(doc["body"])
+                # compute log term frequency and count normalization sum
+                norm = 0
+                for term, tf in count_freq.items():
+                    tf_log = 1 + math.log(tf, 10)
+                    scores[term] = tf_log
+                    norm += tf_log ** 2
+                
+                # compute cosine normalization
+                norm = math.sqrt(norm)
+                for term in scores:
+                    scores[term] /= norm
 
-            # compute log term frequency and count normalization sum
-            norm = 0
-            for term, tf in count_freq.items():
-                tf_log = 1 + math.log(tf, 10)
-                scores[term] = tf_log
-                norm += tf_log ** 2
-            
-            # compute cosine normalization
-            norm = math.sqrt(norm)
-            for term in scores:
-                scores[term] /= norm
-
-            # add current document information to index
-            tfidf[doc["id"]] = scores
-            titles[doc["id"]] = doc["title"]
-            raw[doc["id"]] = doc["raw"]
-            docs[doc["id"]] = " ".join(doc["body"])
-            c = [c.strip().split() for c in doc["categories"]]
-            cat = []
-            for sublist in c:
-                for item in sublist:
-                    if item not in nlp.Defaults.stop_words:
-                        cat.append(item)
-            cats[doc["id"]] = cat
+                # add current document information to index
+                tfidf[doc["id"]] = scores
+                titles[doc["id"]] = doc["title"]
+                raw[doc["id"]] = doc["raw"]
+                docs[doc["id"]] = " ".join(doc["body"])
+                c = [c.strip().split() for c in doc["categories"]]
+                cat = []
+                for sublist in c:
+                    for item in sublist:
+                        if item not in nlp.Defaults.stop_words:
+                            cat.append(item)
+                cats[doc["id"]] = cat
 
     return tfidf, titles, docs, raw, cats
 
@@ -440,7 +439,7 @@ def main():
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
     # Construct the tf-idf index
-    print("Constructing the tf-idf index. This will take up to two minutes...")
+    print("Constructing the tf-idf index...")
     tfidf_index, articles_dict, docs, raw, cats = build_index("483_cleaned_articles")
     print("Done!", len(articles_dict), "document scores computed")
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
