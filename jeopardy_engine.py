@@ -95,7 +95,7 @@ def wiki_files_to_json(source, dir_path):
                 doc_id += 1
 
         # write all articles to an output JSON file
-        with open(dir_path + "/cleaned" + str(file_num) + ".json", "w", encoding='utf-8') as out_f:
+        with open(f"{dir_path}/cleaned{file_num:02}.json", "w", encoding='utf-8') as out_f:
             json.dump(articles, out_f, ensure_ascii=False, indent=4)
         articles = []
         file_num += 1
@@ -108,18 +108,19 @@ def wiki_files_to_json(source, dir_path):
 Build a TF-IDF index from all of the article data. This uses the LNC LTN
 formulas from Homework 3.
 Args: json_dir - The directory where the JSON files are stored
-Returns: A tf-idf index created from the JSON data and a dictionary mapping
-    document IDs to article titles.
+Returns: A tf-idf index created from the JSON data, a dictionary mapping
+    document IDs to article titles, a mapping of doc IDs to cleaned body tokens,
+    a mapping of doc IDs to raw body text, and a mapping of doc IDs to a list
+    of cleaned category tokens
 """
 def build_index(json_dir):
     # make sure user has the json files
     if not os.path.isdir(json_dir):
         print(f"ERROR: directory {json_dir} does not exist")
         exit()
-    # TODO: uncomment this later
-    # if len(os.listdir(json_dir)) != 80:
-    #     print(f"ERROR: user has not downloaded all JSON files into directory {json_dir}")
-    #     exit()
+    if len(os.listdir(json_dir)) != 80:
+        print(f"ERROR: user has not downloaded all JSON files into directory {json_dir}")
+        exit()
 
     # tf-idf index (dict of dicts);  doc_id -> term -> tf-idf
     tfidf = {}
@@ -130,7 +131,7 @@ def build_index(json_dir):
     # dict holding list of processed token from document
     docs = {}
     # dict holding categories for each document
-    cats = {}
+    # cats = {}
 
     # extract article information from all JSON files 
     for filename in os.listdir(json_dir):
@@ -162,23 +163,23 @@ def build_index(json_dir):
                 titles[doc["id"]] = doc["title"]
                 raw[doc["id"]] = doc["raw"]
                 docs[doc["id"]] = " ".join(doc["body"])
-                c = [c.strip().split() for c in doc["categories"]]
-                cat = []
-                for sublist in c:
-                    for item in sublist:
-                        if item not in nlp.Defaults.stop_words:
-                            cat.append(item)
-                cats[doc["id"]] = cat
+                # c = [c.strip().split() for c in doc["categories"]]
+                # cat = []
+                # for sublist in c:
+                #     for item in sublist:
+                #         if item not in nlp.Defaults.stop_words:
+                #             cat.append(item)
+                # cats[doc["id"]] = cat
 
-    return tfidf, titles, docs, raw, cats
+    return tfidf, titles, docs, raw, None # removed categories
 
 
 """
 Processes the 100 Jeopardy! questions from the given file. Extracts the
 answer(s) and gets the cleaned lemma tokens of the question text.
 Args: q_file - filename where the questions are stored
-Returns: a list of dictionaries containing the cleaned questions and
-    their answer(s)
+Returns: a list of dictionaries containing the cleaned questions, 
+    their category, and their answer(s)
 """
 def process_questions(q_file):
     cleaned_questions = []
@@ -194,14 +195,14 @@ def process_questions(q_file):
                 answers = q.pop(-1).split("|")
 
                 # process the question text
-                # q = " ".join(q)
                 category = q.pop(0)
                 original_question = q.pop(0)
                 category_doc = nlp(category)
 
+                # get the lemma of the category
                 category_cleaned = []
-
                 for token in category_doc:
+                    # ignore the "Alex" blurbs
                     if token.text == "(":
                         break
                     if not token.is_punct and not token.is_space and not token.is_stop:
@@ -230,6 +231,9 @@ Args:
     titles - dictionary mapping doc IDs to article titles
     N - total number of documents in the vocabulary
     num - cutoff for number of titles to return. "Return top 'num' results"
+    docs - dict mapping doc IDs to cleaned body tokens
+    raw - dict mapping doc IDs to raw body text
+    categories - dict mapping doc IDs to list of cleaned category tokens
 """
 def answer_questions(questions, tfidf, titles, N, num, docs, raw, categories):
     # keep track of the correct answers and their positions
@@ -311,13 +315,16 @@ def answer_questions(questions, tfidf, titles, N, num, docs, raw, categories):
         # sort by score (descending)
         sorted_scores = sorted(question_scores.items(), key=lambda item: item[1], reverse=True)
 
+        # get top 500
         check1 = [titles[doc_id] for doc_id, _ in sorted_scores[:500]]
 
+        # remove docs with score of 0
         question_top_docs = [
             doc_id for doc_id, score in sorted_scores
             if score > 0
         ]
 
+        # get top 100 nonzero
         question_top_docs = question_top_docs[:1000]
 
         # post_question_reduction = int(len(category_top_docs) * 1)
@@ -332,6 +339,7 @@ def answer_questions(questions, tfidf, titles, N, num, docs, raw, categories):
         # potential_doc_ids = list(set(combined_top_docs + question_top_docs + category_top_docs))
         potential_top_docs = [raw[doc_id] for doc_id in question_top_docs]
 
+        # rerank top 1000 documents using an LLM cosine similarity
         question_embedding = model.encode(question["original"], convert_to_tensor=True)
         doc_embeddings = model.encode(potential_top_docs, convert_to_tensor=True)
 
@@ -388,11 +396,11 @@ def answer_questions(questions, tfidf, titles, N, num, docs, raw, categories):
             positions.append(None)
         
         print("~~~~~")
-    print(positions)
-    print(positions1)
+    
     print(f"Final score: {hit_count}/100, {hit_count}% hit rate for reranking")
     print(f"Final score: {hit_count1}/100, {hit_count1}% hit rate for tfidf")
 
+    # shows the hit distribution for reranking from 1 to 500
     t = {1:0, 20:0, 50:0, 100:0, 250:0, 500:0}
     for pos in positions:
         if pos:
@@ -410,6 +418,7 @@ def answer_questions(questions, tfidf, titles, N, num, docs, raw, categories):
                 t[500] += 1
     print(t)
 
+    # shows the hit distribution for just tf-idf from 1 to 500
     t = {1:0, 20:0, 50:0, 100:0, 250:0, 500:0}
     for pos in positions1:
         if pos:
@@ -440,7 +449,7 @@ def main():
 
     # Construct the tf-idf index
     print("Constructing the tf-idf index...")
-    tfidf_index, articles_dict, docs, raw, cats = build_index("483_cleaned_articles")
+    tfidf_index, articles_dict, docs, raw, cats = build_index("cleaned_articles")
     print("Done!", len(articles_dict), "document scores computed")
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
